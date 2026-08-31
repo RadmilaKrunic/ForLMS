@@ -1,0 +1,20 @@
+[Unit]
+Description=ForLMS backend API (NestJS)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=forlms
+Group=forlms
+WorkingDirectory=/opt/forlms/backend
+EnvironmentFile=/opt/forlms/backend/.env
+ExecStart=/usr/bin/node dist/main.js
+Restart=on-failure
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
