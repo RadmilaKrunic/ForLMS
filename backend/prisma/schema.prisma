@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuthSource {
+  LDAP
+  LOCAL
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum EnrollmentStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+/// Seed roles: Administrator, ContentManager, Learner (ELR_LMS_005)
+model Role {
+  id          String            @id @default(uuid())
+  name        String            @unique
+  description String?
+  users       UserRole[]
+  adGroups    AdGroupRoleMapping[]
+  createdAt   DateTime          @default(now())
+}
+
+/// ELR_LMS_009: local accounts co-exist with AD-provisioned accounts
+model User {
+  id           String        @id @default(uuid())
+  username     String        @unique
+  email        String?       @unique
+  displayName  String
+  orgUnit      String?
+  authSource   AuthSource    @default(LDAP)
+  ldapDn       String?       @unique
+  passwordHash String?
+  isActive     Boolean       @default(true)
+  lastLoginAt  DateTime?
+  roles        UserRole[]
+  enrollments  Enrollment[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+/// Maps an AD security group DN to a platform Role (ELR_LMS_009)
+model AdGroupRoleMapping {
+  id      String @id @default(uuid())
+  groupDn String @unique
+  roleId  String
+  role    Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+}
+
+/// ELR_CNT_004 / ELR_LMS_008: self-service course catalog entries
+model Course {
+  id          String         @id @default(uuid())
+  title       String
+  description String?
+  language    String         @default("sr-Cyrl")
+  status      CourseStatus   @default(DRAFT)
+  createdBy   String?
+  packages    ScormPackage[]
+  enrollments Enrollment[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+/// ELR_CNT_001/005/006: versioned SCORM 1.2 content packages
+model ScormPackage {
+  id                String   @id @default(uuid())
+  courseId          String
+  course            Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  version           Int      @default(1)
+  scormVersion      String   @default("1.2")
+  manifestIdentifier String
+  entryPoint         String
+  storagePath        String
+  uploadedBy         String?
+  uploadedAt         DateTime @default(now())
+
+  @@unique([courseId, version])
+}
+
+/// ELR_LMS_005/006: assignment + completion state
+model Enrollment {
+  id          String            @id @default(uuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId    String
+  course      Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assignedBy  String?
+  status      EnrollmentStatus  @default(NOT_STARTED)
+  scoreRaw    Float?
+  completedAt DateTime?
+  tracking    ScormTrackingRecord[]
+  assignedAt  DateTime          @default(now())
+
+  @@unique([userId, courseId])
+}
+
+/// ELR_LMS_003/006: persisted SCORM 1.2 CMI data model per attempt
+model ScormTrackingRecord {
+  id             String     @id @default(uuid())
+  enrollmentId   String
+  enrollment     Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lessonStatus   String? // cmi.core.lesson_status
+  scoreRaw       Float? // cmi.core.score.raw
+  sessionTime    String? // cmi.core.session_time
+  suspendData    String? // cmi.suspend_data
+  cmiData        Json // full last-committed CMI data set
+  lastAccessedAt DateTime   @default(now())
+}
+
+/// ELR_LMS_010 handover accountability
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+}
